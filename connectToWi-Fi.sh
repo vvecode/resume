@@ -39,6 +39,31 @@ setUtilityPath() {
 	device=$("${cfgutil}" get ECID 2>/dev/null)
 }
 
+getMobileDeviceInformation() {
+	serial=$("${cfgutil}" -e $device get serialNumber 2>/dev/null)
+	endpoint="JSSResource/mobiledevices/serialnumber/${serial}"
+	xml=$(curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint} -X GET)
+	assetTag=$(printf "${xml}" | xmllint --xpath '/mobile_device/general/asset_tag/text()' - 2>/dev/null)
+	deviceID=$(printf "${xml}" | xmllint --xpath '/mobile_device/general/id/text()' - 2>/dev/null)
+}
+
+verifyEnrollment() {
+	getMobileDeviceInformation
+	endpoint="JSSResource/mobiledevices/serialnumber/${serial}"
+	xml=$(curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint} -X GET)
+	jssSerial=$(printf "${xml}" | xmllint --xpath '/mobile_device/general/serial_number/text()' - 2>/dev/null)
+	if [[ -z $jssSerial ]]
+	then
+		# Device is not enrolled
+		printf "The JSS has no record of the device $serial\n"
+		notifyNoRecord
+		printf "Error: 404\nRecord not found\n"
+		exit 404
+	else
+		printf "Record found: Serial: $serial\nJSS Serial: $jssSerial\n"
+	fi
+}
+
 createProfile() {
 	tee "${unsignedProfile}" << Profile
 	<?xml version="1.0" encoding="UTF-8"?>
@@ -115,12 +140,26 @@ deleteProfile() {
 	printf "Wi-Fi profile deleted\n"
 }
 
+notifyNoRecord() {
+	runAsUser osascript -e 'set theAlertText to "Error: 404\n Record not found\n"
+set theAlertMessage to "A device with serial:'$serial' was not found."
+display alert theAlertText message theAlertMessage' >/dev/null 2>&1
+}
+
+notifyComplete() {
+	runAsUser osascript -e 'set theAlertText to "Complete"
+set theAlertMessage to "Please go to device:\n'"$assetTag"'\nto complete the installation."
+display alert theAlertText message theAlertMessage' >/dev/null 2>&1
+}
+
 installWi-FiProfile() {
 	setUtilityPath
+	verifyEnrollment
 	createProfile
 	signProfile
 	installProfile
 	deleteProfile
+	notifyComplete
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
