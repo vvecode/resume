@@ -6,7 +6,7 @@
 source "/PATH/TO/CUSTOM/FUNCTIONS"
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Compare local user account to a list of management accounts to be kept and
+# Compare local user accounts to a list of management accounts to be kept and
 # remove any accounts not listed.
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define Variables
