@@ -7,8 +7,8 @@ source "<PATH/TO/CUSTOM/FUNCTIONS>"
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # This script compares the currently logged in user to the currently assigned user and a list of service accounts.  #
-# If the logged in user matches neither one of the specified service accounts, or the currently assigned user,				#
-# the inventory record is updated, assigning it to the logged in user.																							#
+# If the logged in user matches neither one of the specified service accounts, or the currently assigned user,	    #
+# the inventory record is updated, assigning it to the logged in user.						    #																	#
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define Variables
 
