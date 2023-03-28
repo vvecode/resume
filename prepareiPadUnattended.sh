@@ -16,22 +16,51 @@ apiPassPhrase="<PASSPHRASE>"
 jssUser="<APIUSERNAME>"
 jssPass=$(DecryptString "$apiString" "$apiPassPhrase")
 
+bundleIdentifier="com.apple.configurator.ui"
+
 wifiProfile="<PATH/TO/CONFIGURATION/PROFILE>"
 
 starttime=$(date +%s)
-
+passcode="123456"
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define functions
 
 editPATH() {
-	application=$(ls /Applications | grep "Apple Configurator")
+	application=$(mdfind kMDItemCFBundleIdentifier = "$bundleIdentifier")
 	PATH=$PATH:"/Applications/$application/Contents/MacOS/"
 }
 
 setUtilityPath() {
-	application=$(ls /Applications | grep "Apple Configurator")
-	utilityPath=$(ls /Applications/"$application"/Contents/MacOS/cfgutil)
-	cfgutil="${utilityPath}"
+	cfgutil="$application/Contents/MacOS/cfgutil"
+}
+
+getComputerInformation() {
+	computerSerial=$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')
+	endpoint="JSSResource/computers/serialnumber/$computerSerial"
+	xml=$(curl -X GET -u ${jssUser}:${jssPass} ${jssURL}${endpoint} -H "accept: application/xml")
+	computerBuilding=$(echo $xml | xmllint --xpath "string(//building)" -)
+}
+
+assignToComputerBuilding() {
+	printf "Assigning device $serial to \"$computerBuilding\"\n"
+	endpoint="JSSResource/mobiledevices/id/$deviceID"
+	xmlSnippet="<mobile_device><location><building>$computerBuilding</building></location></mobile_device>"
+	curl -sku ${jssUser}:${jssPass} ${jssURL}${endpoint} -X PUT -H Content-Type: text/xml -d ${xmlSnippet} 2>&1
+	printf "iPad: $serial now assigned to \"$computerBuilding\"\n"
+}
+
+checkForConfigurator() {
+	printf "Checking for Apple Configurator…\n"
+	service='Apple Configurator'
+	if pgrep -xq -- "${service}"
+	then
+		printf "Apple Configurator is already running\n\n"
+	else
+		printf "Apple Configurator is not running.\nLaunching…\n\n"
+		open "$application"
+		sleep 2
+		printf "Apple Configurator is now running\n\n"
+	fi
 }
 
 countAttachedDevices() {
@@ -59,11 +88,27 @@ getAttachedDevices() {
 	fi
 }
 
+correctECID() {
+	printf "Correcting ECID…\n"
+	device=${device:0:${#device}-(($n-16))}
+	printf "ECID Corrected: $device\n"
+}
+
+checkECID() {
+	printf "Checking ECID: $device\n"
+	n=$(echo $device | awk '{print length}')
+	if [[ $n -gt 16 ]]
+	then
+		printf "Malformed ECID: $device\n"
+		correctECID
+	fi
+}
+
 getMobileDeviceInformation() {
-#	serial=$("${cfgutil}" -e $device get serialNumber 2>/dev/null)
+	checkECID
+	serial=$("${cfgutil}" -e $device get serialNumber 2>/dev/null)
 	endpoint="JSSResource/mobiledevices/serialnumber/${serial}"
 	xml=$(curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint} -X GET)
-	assetTag=$(printf "${xml}" | xmllint --xpath '/mobile_device/general/asset_tag/text()' - 2>/dev/null)
 	deviceID=$(printf "${xml}" | xmllint --xpath '/mobile_device/general/id/text()' - 2>/dev/null)
 }
 
@@ -71,17 +116,15 @@ configureMobileDeviceName() {
 	if [[ $isEnrolled -eq 0 ]]
 	then
 		printf "Configuring device name\n"
-		"${cfgutil}" -e $device rename $assetTag 2>/dev/null
-		printf "Device name configured: \"$assetTag\"\n"
+		"${cfgutil}" -e $device rename $serial 2>/dev/null
+		printf "Device name set to serial: \"$serial\"\n"
 	else
 		printf "Unable to configure the device name because no record was found.\n"
 	fi
 }
 
-configureNetwork() {
-	if [[ ! -e "$wifiProfile" ]]
-		then
-		tee ${wifiProfile} << Profile
+createProfile() {
+	tee "${wifiProfile}" << Profile
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -140,42 +183,69 @@ configureNetwork() {
 </dict>
 </plist>
 Profile
+}
+
+checkForProfile() {
+	if [[ ! -e ${wifiProfile} ]]
+	then
+		createProfile
 	fi
-	"${cfgutil}" -e $device install-profile "$wifiProfile" >/dev/null 2>&1
-	printf "Wi-Fi profile installed\n"
+}
+
+installProfile() {
+	checkForProfile
+	printf "Installing Wi-Fi profile\n"
+	"${cfgutil}" -e ${device} install-profile "${wifiProfile}" >/dev/null 2>&1
+	printf "Profile installed\n"
 }
 
 prepareDevice() {
 	printf "Preparing…\n"
-	configureNetwork
+	installProfile
 	"${cfgutil}" -e $device prepare --dep --skip-language --skip-region 2>/dev/null
-	printf "iPad $assetTag prepared successfully\n"
+	printf "iPad $serial prepared successfully\n"
 }
 
 blankPush() {
-	endpoint="JSSResource/mobiledevicecommands/command/BlankPush/${assetTag}/id/${deviceID}"
+	endpoint="JSSResource/mobiledevicecommands/command/BlankPush/${hostname}/id/${deviceID}"
 	curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint} -X POST 1>/dev/null
 }
 
 updateInventory() {
-	printf "Updating inventory record: "$assetTag"…\n"
-	endpoint="JSSResource/mobiledevicecommands/command/UpdateInventory/${assetTag}/id/${deviceID}"
+	printf "Updating inventory record: "$serial"…\n"
+	endpoint="JSSResource/mobiledevicecommands/command/UpdateInventory/${hostname}/id/${deviceID}"
 	curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint} -X POST 1>/dev/null
 	sleep 3
 	blankPush
 }
 
+getBootedState(){
+	bootedState=$("${cfgutil}" -e $device get bootedState)
+	printf "Booted State: $bootedState\n"
+}
+
+waitForDevice() {
+	if [[ $dot -lt 10 ]]
+	then
+		printf ". "
+		((dot+=1))
+	else
+		printf "\n"
+		((dot=0))
+	fi
+	sleep 1
+}
+
 restoreDevice() {
-	timer=60
+	timer=90
 	printf "Restoring…\n"
 	"${cfgutil}" -e $device restore 2>/dev/null
-	printf "Waiting for device"
-	for ((i=60; i>0; i--))
+	printf "Waiting for device\n"
+	for ((i=$timer; i>0; i--))
 	do
-		printf ". "
-		sleep 1
+		waitForDevice
 	done
-	printf "Continuing…\n"
+	printf "\nContinuing…\n"
 }
 
 verifyEnrollment() {
@@ -200,7 +270,8 @@ verifyEnrollment() {
 
 checkMobileDeviceName() {
 	attachedDeviceHostname=$("${cfgutil}" -e $device get name 2>/dev/null)
-	if [[ $attachedDeviceHostname != $assetTag ]]; then
+	if [[ $attachedDeviceHostname != $serial ]]
+	then
 		printf "\nHostname Mismatch: $serial\n\n"
 		configureMobileDeviceName
 	fi
@@ -211,15 +282,9 @@ removeCacheFile() {
 	printf "Cache file deleted\n"	
 }
 
-removeWiFiProfile() {
-	rm "$wifiProfile"
-	printf "Wi-Fi profile deleted\n"
-}
-
 cleanup() {
 	printf "Cleaning up…\n"
 	removeCacheFile
-#	removeWiFiProfile
 }
 
 reportStart() {
@@ -232,29 +297,50 @@ reportComplete() {
 	printf "\nComplete: $completedTime\n"
 }
 
-resetDevice() {
+shutDownDevice() {
+	printf "Shutting down device…\n"
+	endpoint="JSSResource/mobiledevicecommands/command/ShutDownDevice/id/$deviceID"
+	curl -su ${jssUser}:${jssPass} -H "Content-type: text/xml" ${jssURL}${endpoint} -X POST 1> /dev/null
+	printf "Command issued to shutdown device\n"
+}
+
+createCacheFile() {
+	touch "$cacheFile"
+	printf "$attachPID" >> $cacheFile
+}
+
+configureiPad() {
+	createCacheFile
+	reportStart
+	restoreDevice
+	verifyEnrollment
+	getMobileDeviceInformation
+	assignToComputerBuilding
+	configureMobileDeviceName
+	prepareDevice
+	checkMobileDeviceName
+	updateInventory
+	cleanup
+	shutDownDevice
+	printLongDuration
+	reportComplete
+}
+
+resetDevices() {
+	editPATH
 	setUtilityPath
+	getComputerInformation
+	checkForConfigurator
 	countAttachedDevices
 	getAttachedDevices
 	for device in "${devices[@]}"
 	do
+		checkECID
 		export attachPID=$$
 		cacheFile="/tmp/com.apple.configurator.AttachedDevices.$device.plist"
 		if [[ ! -f "$cacheFile" ]]
 		then
-			touch "$cacheFile"
-			printf "$attachPID" >> $cacheFile
-			reportStart
-			restoreDevice
-			verifyEnrollment
-			getMobileDeviceInformation
-			configureMobileDeviceName
-			prepareDevice
-			checkMobileDeviceName
-			updateInventory
-			cleanup
-			printLongDuration
-			reportComplete
+			configureiPad
 		else
 			if [[ "$attachPID" == $(cat "$cacheFile") ]]
 			then
@@ -269,6 +355,6 @@ resetDevice() {
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # main
 
-resetDevice
+resetDevices
 
 exit 0
