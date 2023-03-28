@@ -151,7 +151,7 @@ createProfile() {
 			<key>PayloadDisplayName</key>
 			<string>Wi-Fi</string>
 			<key>PayloadIdentifier</key>
-			<string>COM.APPLE.WIFI.MANAGED.BE86367E-FBB1-49B2-B8BA-432B222245FD</string>
+			<string>com.apple.wifi.managed.BE86367E-FBB1-49B2-B8BA-432B222245FD</string>
 			<key>PayloadType</key>
 			<string>com.apple.wifi.managed</string>
 			<key>PayloadUUID</key>
