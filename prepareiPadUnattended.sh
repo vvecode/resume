@@ -151,11 +151,11 @@ createProfile() {
 			<key>PayloadDisplayName</key>
 			<string>Wi-Fi</string>
 			<key>PayloadIdentifier</key>
-			<string>com.apple.wifi.managed.9A9E56C5-33DC-493C-B43E-413DE51E74B4</string>
+			<string>COM.APPLE.WIFI.MANAGED.BE86367E-FBB1-49B2-B8BA-432B222245FD</string>
 			<key>PayloadType</key>
 			<string>com.apple.wifi.managed</string>
 			<key>PayloadUUID</key>
-			<string>9A9E56C5-33DC-493C-B43E-413DE51E74B4</string>
+			<string>BE86367E-FBB1-49B2-B8BA-432B222245FD</string>
 			<key>PayloadVersion</key>
 				<integer>1</integer>
 			<key>ProxyType</key>
@@ -169,15 +169,15 @@ createProfile() {
 	<key>PayloadDisplayName</key>
 	<string>Onboarding 4hr</string>
 	<key>PayloadIdentifier</key>
-	<string>FB89CA16-3361-4C7C-4HOUR-ECC488BFF6A5</string>
+	<string>E1373819-F168-4128-B982-2D152F4EF4D5</string>
 	<key>PayloadOrganization</key>
-	<string>Oak Park Unified School District</string>
+	<string>UCLA Library</string>
 	<key>PayloadRemovalDisallowed</key>
 	<false/>
 	<key>PayloadType</key>
 	<string>Configuration</string>
 	<key>PayloadUUID</key>
-	<string>5E23F1E3-AAC6-4FEB-B41C-437C1D8148F1</string>
+	<string>633DF911-C6F6-4466-B22A-ABD234EB6F31</string>
 	<key>PayloadVersion</key>
 	<integer>1</integer>
 </dict>
