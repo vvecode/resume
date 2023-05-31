@@ -171,7 +171,7 @@ createProfile() {
 	<key>PayloadIdentifier</key>
 	<string>E1373819-F168-4128-B982-2D152F4EF4D5</string>
 	<key>PayloadOrganization</key>
-	<string>UCLA Library</string>
+	<string><ORGANIZATION></string>
 	<key>PayloadRemovalDisallowed</key>
 	<false/>
 	<key>PayloadType</key>
