@@ -6,13 +6,14 @@
 source "<PATH/TO/CUSTOM/FUNCTIONS>"
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Check for macOS installer. If found, run eraseinstall. If the installer
-# is missing, download it, then run eraseinstall.
+# Quick erase macOS Ventura devices that support it. For devices that don't
+# support quick erase, check for the macOS full installer and use it to run
+# eraseinstall. If the installer is missing, download it, then run eraseinstall.
 #
 # Note:
-#	Computer must either have an Intel T2 chip or Apple Silicon processor
-#	AND
-#	Running macOS Monterey or higher to use jss command
+# Computer must either have an Intel T2 chip or Apple Silicon processor
+# AND
+# Running macOS Monterey or higher to use jss command
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define Variables
 
@@ -20,21 +21,22 @@ jssUser="<APIUSERNAME>"
 apiPassPhrase="<PASSPHRASE>"
 jssPass=$(DecryptString "$apiString" "$apiPassPhrase")
 serial=$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')
-password=$(DecryptString "$5" "$6")
+highestSupportedOS=$(softwareupdate --list-full-installers | awk 'NR==3 {print substr($6, 1, length($6)-1)}')
 installedOS=$(sw_vers | awk 'FNR==2{print $2}')
 majorVersion="${installedOS:0:2}"
 T2Chip=$(/usr/sbin/system_profiler SPiBridgeDataType | awk -F': ' '/Model Name:/{print $NF}')
 
 passcode="<PASSCODE>"
-
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define functions
 
 getDeviceInfo() {
 	# Retrieve device inventory information
+	printf "Gathering device information from the jss…\nSerial: $serial\n"
 	endpoint="JSSResource/computers/serialnumber/"
 	xml=$(curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint}${serial} -X GET)
-	computerID=$(printf "${xml}" | xmllint --xpath '/computer/general/id/text()' - 2>/dev/null)
+	computerID=$(echo "${xml}" | xmllint --xpath '/computer/general/id/text()' - 2>/dev/null)
+	printf "Computer ID: $computerID\n"
 }
 
 setOSName(){
@@ -57,18 +59,6 @@ setOSName(){
 	esac
 }
 
-checkForT2() {
-	printf "Checking for T2 chip\n"
-	if [[ -n $T2Chip && $T2Chip ==  *"T2"* ]]
-	then
-		printf "T2 chip present\n"
-		hasT2="true"
-	else
-		printf "T2 chip not present\n"
-		hasT2="false"
-	fi
-}
-
 checkForInstaller() {
 	if [[ -e "/Applications/Install macOS $osName.app" ]]
 	then
@@ -80,58 +70,107 @@ checkForInstaller() {
 	fi
 }
 
+downloadInstallerAlert() {
+	runAsUser osascript -e 'set theDialogText to "Downloading macOS Installer
+
+macOS '"$osName"' must be downloaded before the erase process can begin.
+Click \"Okay\" to begin the download.
+
+* Please note: It may take ~45min before the erase process is complete."
+	display dialog theDialogText buttons {"Okay"} default button "Okay" with icon caution giving up after 60
+	--> Result: {{button returned:"Okay"}'
+}
+
 downloadInstaller() {
-	softwareupdate --fetch-full-installer --full-installer-version ${installedOS}
+	caffeinate -disu softwareupdate --fetch-full-installer --full-installer-version ${highestSupportedOS}
 }
 
 eraseInstall() {
-#	Run eraseinstall command locally from macOS installer
 	printf "Erasing macOS…\n"
-	echo ${password} | "/Applications/Install macOS $osName.app/Contents/Resources/startosinstall" --user "${4}" --stdinpass --forcequitapps --rebootdelay 0 --nointeraction --agreetolicense --forcequitapps --eraseinstall --newvolumename "Macintosh HD"
+	echo ${password} | caffeinate -disu "/Applications/Install macOS $osName.app/Contents/Resources/startosinstall" --user "${4}" --stdinpass --forcequitapps --rebootdelay 0 --nointeraction --agreetolicense --forcequitapps --eraseinstall --newvolumename "Macintosh HD"
+}
+
+localEraseAlert() {
+	runAsUser osascript -e 'set theDialogText to "Slow Erase
+This computer will take ~20 min or more to be erased"
+	display dialog theDialogText buttons {"Okay"} default button "Okay" with icon caution giving up after 60
+	--> Result: {{button returned:"Okay"}'
 }
 
 localErase() {
 #	Check for installer and download if missing then erase machine
+	localEraseAlert
 	if [[ $installerPresent == "true" ]]
 	then
 		eraseInstall
 	else
-		printf "Missing installer. Downloading\n"
+		printf "Missing installer. Downloading…\n"
+		downloadInstallerAlert
 		downloadInstaller
 		printf "Installer downloaded\n"
-		eraseInstall
 	fi
 }
 
 eraseDevice() {
 #	Create EraseDevice command from jss
-	printf "Issuing EraseDevice command from jss…\n"
+	printf "Issuing EraseDevice command from jss…\n\n"
 	xmlSnippet="<computer_command><general><command>EraseDevice</command><passcode>$passcode</passcode></general><computers><computer><id>$computerID</id></computer></computers></computer_command>"
-	endpoint="JSSResource/computercommands/command/EraseDevice/"
+	endpoint="JSSResource/computercommands/command/EraseDevice/passcode/$passcode/id/$computerID"
 	curl -sku ${jssUser}:${jssPass} ${jssURL}${endpoint}${serial} -X POST -H "Content-Type: text/xml" -d ${xmlSnippet} 2>&1
-	printf "EraseDevice command issued\nPasscode: $passcode\n"
+	printf "\n\nEraseDevice command issued\nPasscode: $passcode\n"
+}
+
+quickEraseNotSupportedAlert()  {
+	quickEraseSupported=1
+	runAsUser osascript -e 'set theAlertText to "Quick Erase\nNot Supported\n"
+set theAlertMessage to "Please set aside to be brought up to Powell 390 to be manually reset"
+display alert theAlertText message theAlertMessage' >/dev/null 2>&1
+	printf "Exiting…\n"
+}
+
+checkOSRequirement() {
+	printf "Checking OS…\n"
+	if [[ "$osName" != "Not supported" ]]
+	then
+		printf "macOS $osName supported\n\n"
+	else
+		printf "OS Not supported\n\n"
+		quickEraseNotSupportedAlert
+		exit 101
+	fi
+}
+
+checkHardwareRequirement() {
+	printf "Checking hardware…\n"
+	if [[ "$archType" == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]]
+	then
+		printf "Hardware supported\n\n"
+	else
+		printf "Hardware does not meet requirements\nEraseDevice command not supported\n\n"
+		checkForInstaller
+		localErase
+		eraseInstall
+	fi
+}
+
+checkEraseRequirements() {
+	setOSName
+	checkOSRequirement
+	checkHardwareRequirement
 }
 
 resetMac() {
 #	Determine if jss EraseDevice command is supported
-	checkForT2
-	if [[ $archType == "arm64" || $hasT2 == "true" && $majorVersion > 11 ]]
+	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" =~ ^[1][2,3] ]]
 	then
 #		EraseDevice command supported
 		printf "EraseDevice command supported\n"
 		getDeviceInfo
 		eraseDevice
 	else
-#		EraseDevice command not supported
-		printf "EraseDevice command not supported\n"
-		checkForInstaller
-		localErase
+		checkEraseRequirements
 	fi
-}
-
-resetMac() {
-	setOSName
-	resetMac
+	printf "Architechture: $archType\nHas T2: $T2Chip\nMajor OS: $majorVersion\n"
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
