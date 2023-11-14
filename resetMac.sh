@@ -30,13 +30,57 @@ passcode="<PASSCODE>"
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define functions
 
+# Authentication
+requestBearerToken() {
+	local endpoint="api/v1/auth/token"
+	local response=$(curl -su ${jssUser}:${jssPass} -H "application/json" ${jssURL}${endpoint} -X POST)
+	bearerToken=$(echo "$response" | plutil -extract token raw -)
+	tokenExpiration=$(echo "$response" | plutil -extract expires raw - | awk -F . '{print $1}')
+	tokenExpirationEpoch=$(date -j -f "%Y-%m-%dT%T" "$tokenExpiration" +"%s")
+}
+
+checkTokenExpiration() {
+	local success="Token generated"
+	nowEpochUTC=$(date -j -f "%Y-%m-%dT%T" "$(date -u +"%Y-%m-%dT%T")" +"%s")
+	if [[ tokenExpirationEpoch -gt nowEpochUTC ]]
+	then
+		echo "Token valid until the following epoch time: " "$tokenExpirationEpoch"
+	else
+		echo "Generating token…"
+		requestBearerToken
+		checkResult
+	fi
+}
+
+invalidateToken() {
+	local success="Token invalidated"
+	local endpoint="api/v1/auth/invalidate-token"
+	responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${bearerToken}" ${jssURL}${endpoint} -X POST -s -o /dev/null)
+	if [[ ${responseCode} == 204 ]]
+	then
+		bearerToken=""
+		tokenExpirationEpoch="0"
+		checkResult
+	elif [[ ${responseCode} == 401 ]]
+	then
+		echo "Token already invalid"
+	else
+		echo "An unknown error occurred invalidating the token"
+	fi
+}
+
+# API 2.0
+getManagementID () {
+	local endpoint="api/v1/computers-inventory-detail/$computerID"
+	local record=$(curl -s -H "Authorization: Bearer ${bearerToken}" ${jssURL}${endpoint} -H "application/json" -X GET)
+	managementID=$(echo "$record" | grep -e "managementId" | awk '{print $3}' | tr -d '","\n')
+	echo "Management ID: $managementID"
+}
+
 getDeviceInfo() {
-	# Retrieve device inventory information
-	printf "Gathering device information from the jss…\nSerial: $serial\n"
-	endpoint="JSSResource/computers/serialnumber/"
-	xml=$(curl -su ${jssUser}:${jssPass} -H "accept: text/xml" ${jssURL}${endpoint}${serial} -X GET)
-	computerID=$(echo "${xml}" | xmllint --xpath '/computer/general/id/text()' - 2>/dev/null)
-	printf "Computer ID: $computerID\n"
+	local endpoint="JSSResource/computers/serialnumber/$serial"
+	local record=$(curl -s -H "Authorization: Bearer ${bearerToken}" ${jssURL}${endpoint} -H "application/json" -X GET)
+	computerID=$(echo "${record}" | xmllint --xpath '/computer/general/id/text()' - 2>/dev/null)
 }
 
 setOSName(){
@@ -52,6 +96,10 @@ setOSName(){
 		# macoS 13.0 Ventura
 		13)
 			osName="Ventura"
+		;;
+		# macoS 14.0 Sonoma
+		14)
+			osName="Sonoma"
 		;;
 		*)
 			osName="Not supported"
@@ -112,12 +160,12 @@ localErase() {
 }
 
 eraseDevice() {
-#	Create EraseDevice command from jss
-	printf "Issuing EraseDevice command from jss…\n\n"
-	xmlSnippet="<computer_command><general><command>EraseDevice</command><passcode>$passcode</passcode></general><computers><computer><id>$computerID</id></computer></computers></computer_command>"
-	endpoint="JSSResource/computercommands/command/EraseDevice/passcode/$passcode/id/$computerID"
-	curl -sku ${jssUser}:${jssPass} ${jssURL}${endpoint}${serial} -X POST -H "Content-Type: text/xml" -d ${xmlSnippet} 2>&1
-	printf "\n\nEraseDevice command issued\nPasscode: $passcode\n"
+	local endpoint="api/preview/mdm/commands"
+	local data='{
+	"commandData": {"commandType": "ERASE_DEVICE", "pin": "390390", "obliterationBehavior": "Default"},
+	"clientData": [{"managementId": "'"${managementID}"'"}]
+}'
+	curl -s -H "Authorization: Bearer ${bearerToken}" -H "accept: application/json" -H "content-type: application/json" "${jssURL}${endpoint}" -X POST -d "$data"
 }
 
 quickEraseNotSupportedAlert()  {
@@ -160,14 +208,18 @@ checkEraseRequirements() {
 }
 
 resetMac() {
-#	Determine if jss EraseDevice command is supported
+	checkTokenExpiration
+	#	Determine if jss EraseDevice command is supported
 	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" =~ ^[1][2,3] ]]
 	then
-#		EraseDevice command supported
+		# EraseDevice command supported
 		printf "EraseDevice command supported\n"
 		getDeviceInfo
+		getManagementID
 		eraseDevice
+		invalidateToken
 	else
+		# EraseDevice command not supported
 		checkEraseRequirements
 	fi
 	printf "Architechture: $archType\nHas T2: $T2Chip\nMajor OS: $majorVersion\n"
