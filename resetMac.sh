@@ -25,8 +25,6 @@ highestSupportedOS=$(softwareupdate --list-full-installers | awk 'NR==3 {print s
 installedOS=$(sw_vers | awk 'FNR==2{print $2}')
 majorVersion="${installedOS:0:2}"
 T2Chip=$(/usr/sbin/system_profiler SPiBridgeDataType | awk -F': ' '/Model Name:/{print $NF}')
-
-passcode="<PASSCODE>"
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # Define functions
 
@@ -162,7 +160,7 @@ localErase() {
 eraseDevice() {
 	local endpoint="api/preview/mdm/commands"
 	local data='{
-	"commandData": {"commandType": "ERASE_DEVICE", "pin": "390390", "obliterationBehavior": "Default"},
+	"commandData": {"commandType": "ERASE_DEVICE", "pin": "<PASSCODE>", "obliterationBehavior": "Default"},
 	"clientData": [{"managementId": "'"${managementID}"'"}]
 }'
 	curl -s -H "Authorization: Bearer ${bearerToken}" -H "accept: application/json" -H "content-type: application/json" "${jssURL}${endpoint}" -X POST -d "$data"
@@ -171,7 +169,7 @@ eraseDevice() {
 quickEraseNotSupportedAlert()  {
 	quickEraseSupported=1
 	runAsUser osascript -e 'set theAlertText to "Quick Erase\nNot Supported\n"
-set theAlertMessage to "Please set aside to be brought up to Powell 390 to be manually reset"
+set theAlertMessage to "Please set aside to be manually reset"
 display alert theAlertText message theAlertMessage' >/dev/null 2>&1
 	printf "Exiting…\n"
 }
@@ -209,8 +207,8 @@ checkEraseRequirements() {
 
 resetMac() {
 	checkTokenExpiration
-	#	Determine if jss EraseDevice command is supported
-	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" =~ ^[1][2,3] ]]
+	# Determine if jss EraseDevice command is supported
+	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" -ge "12" ]]
 	then
 		# EraseDevice command supported
 		printf "EraseDevice command supported\n"
