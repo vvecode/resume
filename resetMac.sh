@@ -208,7 +208,7 @@ checkEraseRequirements() {
 resetMac() {
 	checkTokenExpiration
 	# Determine if jss EraseDevice command is supported
-	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" -ge "12" ]]
+	if [[ $archType == "arm64" || "$T2Chip" == "Apple T2 Security Chip" ]] && [[ "$installedOS" =~ ^[1][2,3,4] ]]
 	then
 		# EraseDevice command supported
 		printf "EraseDevice command supported\n"
