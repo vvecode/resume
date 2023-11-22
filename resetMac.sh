@@ -215,8 +215,9 @@ resetMac() {
 		getDeviceInfo
 		getManagementID
 		eraseDevice
-        invalidateToken
+        	invalidateToken
 	else
+ 		# EraseDevice command not supported
 		checkEraseRequirements
 	fi
 	printf "Architechture: $archType\nHas T2: $T2Chip\nMajor OS: $majorVersion\n"
